@@ -1,10 +1,14 @@
 const express = require('express');
-const { updateProfile } = require('../controllers/userController');
+const { updateProfile, getApprovedProviders, getFeaturedProviders } = require('../controllers/userController');
 const { protect } = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
-// Apply auth middleware to all routes mapped to this router
+// Public routes
+router.get('/providers/featured', getFeaturedProviders);
+router.get('/providers/approved', getApprovedProviders);
+
+// Apply auth middleware to all routes mapped to this router below
 router.use(protect);
 
 router.put('/profile', updateProfile);

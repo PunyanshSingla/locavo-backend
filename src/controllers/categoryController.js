@@ -1,0 +1,122 @@
+const Category = require('../models/Category');
+
+// ─── Public ──────────────────────────────────────────────────────────────────
+
+// @desc    Get all active categories (for homepage / public use)
+// @route   GET /api/v1/categories
+// @access  Public
+exports.getCategories = async (req, res) => {
+  try {
+    const categories = await Category.find({ isActive: true })
+      .sort({ sortOrder: 1, createdAt: 1 })
+      .lean();
+
+    res.status(200).json({ success: true, count: categories.length, data: categories });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Server Error' });
+  }
+};
+
+// @desc    Get single category by slug
+// @route   GET /api/v1/categories/:slug
+// @access  Public
+exports.getCategoryBySlug = async (req, res) => {
+  try {
+    const category = await Category.findOne({ slug: req.params.slug, isActive: true }).lean();
+
+    if (!category) {
+      return res.status(404).json({ success: false, error: 'Category not found' });
+    }
+
+    res.status(200).json({ success: true, data: category });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Server Error' });
+  }
+};
+
+// ─── Admin ────────────────────────────────────────────────────────────────────
+
+// @desc    Get ALL categories including inactive (admin view)
+// @route   GET /api/v1/admin/categories
+// @access  Private (Admin)
+exports.getAllCategoriesAdmin = async (req, res) => {
+  try {
+    const categories = await Category.find().sort({ sortOrder: 1, createdAt: 1 }).lean();
+    res.status(200).json({ success: true, count: categories.length, data: categories });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Server Error' });
+  }
+};
+
+// @desc    Create a new category
+// @route   POST /api/v1/admin/categories
+// @access  Private (Admin)
+exports.createCategory = async (req, res) => {
+  try {
+    const { name, icon, startingPrice, description, sortOrder } = req.body;
+
+    const category = await Category.create({ name, icon, startingPrice, description, sortOrder });
+
+    res.status(201).json({ success: true, data: category });
+  } catch (err) {
+    // Duplicate key
+    if (err.code === 11000) {
+      return res.status(400).json({ success: false, error: 'A category with that name already exists' });
+    }
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Server Error' });
+  }
+};
+
+// @desc    Update a category
+// @route   PUT /api/v1/admin/categories/:id
+// @access  Private (Admin)
+exports.updateCategory = async (req, res) => {
+  try {
+    const { name, icon, startingPrice, description, isActive, sortOrder } = req.body;
+
+    const category = await Category.findById(req.params.id);
+
+    if (!category) {
+      return res.status(404).json({ success: false, error: 'Category not found' });
+    }
+
+    if (name !== undefined) category.name = name;
+    if (icon !== undefined) category.icon = icon;
+    if (startingPrice !== undefined) category.startingPrice = startingPrice;
+    if (description !== undefined) category.description = description;
+    if (isActive !== undefined) category.isActive = isActive;
+    if (sortOrder !== undefined) category.sortOrder = sortOrder;
+
+    await category.save();
+
+    res.status(200).json({ success: true, data: category });
+  } catch (err) {
+    if (err.code === 11000) {
+      return res.status(400).json({ success: false, error: 'A category with that name already exists' });
+    }
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Server Error' });
+  }
+};
+
+// @desc    Delete a category
+// @route   DELETE /api/v1/admin/categories/:id
+// @access  Private (Admin)
+exports.deleteCategory = async (req, res) => {
+  try {
+    const category = await Category.findByIdAndDelete(req.params.id);
+
+    if (!category) {
+      return res.status(404).json({ success: false, error: 'Category not found' });
+    }
+
+    res.status(200).json({ success: true, data: {} });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Server Error' });
+  }
+};

@@ -52,6 +52,9 @@ const userSchema = new mongoose.Schema(
     emailVerificationCode: {
       type: String,
     },
+    emailVerificationCodeExpire: {
+      type: Date,
+    },
     authProvider: {
       type: String,
       enum: ['email', 'google'],
@@ -81,6 +84,22 @@ const userSchema = new mongoose.Schema(
         type: Boolean,
         default: false,
       },
+      documentType: {
+        type: String,
+        enum: ['Aadhar Card', 'PAN Card', 'Driving License', 'Passport', 'Voter ID'],
+      },
+      documentImage: {
+        type: String, // Cloudinary URL
+      },
+      liveSelfie: {
+        type: String, // Cloudinary URL
+      },
+      bankDetails: {
+        accountName: String,
+        accountNumber: String,
+        ifscCode: String,
+        bankName: String,
+      },
       rating: {
         type: Number,
         default: 0,
@@ -88,7 +107,15 @@ const userSchema = new mongoose.Schema(
       numReviews: {
         type: Number,
         default: 0,
-      }
+      },
+      isFeatured: {
+        type: Boolean,
+        default: false,
+      },
+      featuredUntil: {
+        type: Date, // null = not featured; set to 30 days ahead on payment
+        default: null,
+      },
     },
   },
   {

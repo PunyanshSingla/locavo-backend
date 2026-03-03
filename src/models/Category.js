@@ -4,28 +4,53 @@ const categorySchema = new mongoose.Schema(
   {
     name: {
       type: String,
-      required: [true, 'Please add a category name'],
-      unique: true,
+      required: [true, 'Category name is required'],
       trim: true,
-      maxlength: [50, 'Name cannot be more than 50 characters'],
+      unique: true,
+      maxlength: [60, 'Name cannot exceed 60 characters'],
     },
-    description: {
+    slug: {
       type: String,
-      required: [true, 'Please add a description'],
-      maxlength: [500, 'Description cannot be more than 500 characters'],
+      unique: true,
+      lowercase: true,
     },
     icon: {
       type: String,
-      default: 'default-category.jpg',
+      required: [true, 'Material Symbols icon name is required'],
+      trim: true,
+    },
+    startingPrice: {
+      type: Number,
+      required: [true, 'Starting price is required'],
+      min: [0, 'Price cannot be negative'],
+    },
+    description: {
+      type: String,
+      maxlength: [200, 'Description cannot exceed 200 characters'],
+      default: '',
     },
     isActive: {
       type: Boolean,
       default: true,
-    }
+    },
+    sortOrder: {
+      type: Number,
+      default: 0,
+    },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
+
+// Auto-generate slug from name before save
+categorySchema.pre('save', async function () {
+  if (this.isModified('name')) {
+    this.slug = this.name
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-');
+  }
+});
 
 module.exports = mongoose.model('Category', categorySchema);

@@ -1,15 +1,43 @@
 const User = require('../models/User');
-const dotenv = require('dotenv');
-dotenv.config();
-if(!process.env.RESEND_API_KEY){
-  console.log('RESEND_API_KEY not found');
-}
 const { Resend } = require('resend');
 const crypto = require('crypto');
 const { OAuth2Client } = require('google-auth-library');
 
 const resend = new Resend(process.env.RESEND_API_KEY);
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+// Use environment variable - never hardcode localhost
+const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
+
+// ─── Shared helper: find or create a user from a verified Google payload ────
+const findOrCreateGoogleUser = async (googleId, email, name, picture, role) => {
+  let user = await User.findOne({ email });
+
+  if (user) {
+    // Existing user: link Google account if not already linked
+    if (user.authProvider !== 'google') {
+      user.googleId = googleId;
+      user.authProvider = 'google';
+      user.isEmailVerified = true;
+      await user.save();
+    }
+  } else {
+    // New user: create with a strong random password (not used for login)
+    const dummyPassword =
+      Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8);
+    user = await User.create({
+      name,
+      email,
+      password: dummyPassword,
+      role: role || 'customer',
+      profilePicture: picture,
+      authProvider: 'google',
+      googleId,
+      isEmailVerified: true,
+    });
+  }
+  return user;
+};
 
 // @desc    Register user
 // @route   POST /api/v1/auth/register
@@ -22,13 +50,17 @@ exports.register = async (req, res, next) => {
 
     if (userExists) {
       if (!userExists.isEmailVerified) {
-        return res.status(400).json({ success: false, error: 'User exists but email is not verified. Please verify your email.' });
+        return res.status(400).json({
+          success: false,
+          error: 'User exists but email is not verified. Please verify your email.',
+        });
       }
       return res.status(400).json({ success: false, error: 'User already exists' });
     }
 
-    // Generate 6 digit code
+    // Generate 6-digit code + 15-minute expiry
     const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
+    const verificationExpire = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
 
     const user = await User.create({
       name,
@@ -37,19 +69,19 @@ exports.register = async (req, res, next) => {
       role,
       phone,
       emailVerificationCode: verificationCode,
-      authProvider: 'email'
+      emailVerificationCodeExpire: verificationExpire,
+      authProvider: 'email',
     });
 
-    // Send email (Mocked for Buildathon, or use actual if API key valid)
     try {
       await resend.emails.send({
         from: 'Locavo <locavo@locavo.punyanshsingla.com>',
         to: email,
         subject: 'Verify your Locavo account',
-        html: `<p>Your verification code is: <strong>${verificationCode}</strong></p>`
+        html: `<p>Your verification code is: <strong>${verificationCode}</strong></p><p>This code expires in 15 minutes.</p>`,
       });
     } catch (emailErr) {
-      console.error('Email failed to send, but user created:', emailErr);
+      console.error('Email failed to send, but user created:', emailErr.message);
     }
 
     res.status(201).json({ success: true, message: 'Verification email sent' });
@@ -76,12 +108,21 @@ exports.verifyEmail = async (req, res, next) => {
       return res.status(400).json({ success: false, error: 'Email already verified' });
     }
 
+    // Check expiry
+    if (!user.emailVerificationCodeExpire || user.emailVerificationCodeExpire < Date.now()) {
+      return res.status(400).json({
+        success: false,
+        error: 'Verification code has expired. Please request a new one.',
+      });
+    }
+
     if (user.emailVerificationCode !== code) {
       return res.status(400).json({ success: false, error: 'Invalid verification code' });
     }
 
     user.isEmailVerified = true;
-    user.emailVerificationCode = undefined; // Clear code
+    user.emailVerificationCode = undefined;
+    user.emailVerificationCodeExpire = undefined;
     await user.save();
 
     sendTokenResponse(user, 200, res);
@@ -107,21 +148,20 @@ exports.resendVerification = async (req, res, next) => {
       return res.status(400).json({ success: false, error: 'Email already verified' });
     }
 
-    // Generate 6 digit code
     const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
     user.emailVerificationCode = verificationCode;
+    user.emailVerificationCodeExpire = new Date(Date.now() + 15 * 60 * 1000);
     await user.save();
 
-    // Send email
     try {
       await resend.emails.send({
-        from: 'Locavo <onboarding@resend.dev>',
+        from: 'Locavo <locavo@locavo.punyanshsingla.com>',
         to: email,
         subject: 'Verify your Locavo account',
-        html: `<p>Your verification code is: <strong>${verificationCode}</strong></p>`
+        html: `<p>Your new verification code is: <strong>${verificationCode}</strong></p><p>This code expires in 15 minutes.</p>`,
       });
     } catch (emailErr) {
-      console.error('Email failed to send resend code:', emailErr);
+      console.error('Resend email failed:', emailErr.message);
     }
 
     res.status(200).json({ success: true, message: 'Verification code resent. Check your email.' });
@@ -154,9 +194,12 @@ exports.login = async (req, res, next) => {
       return res.status(401).json({ success: false, error: 'Invalid credentials' });
     }
 
-    // Check if email is verified
     if (!user.isEmailVerified) {
-      return res.status(401).json({ success: false, error: 'Please verify your email first', requiresVerification: true });
+      return res.status(401).json({
+        success: false,
+        error: 'Please verify your email first',
+        requiresVerification: true,
+      });
     }
 
     sendTokenResponse(user, 200, res);
@@ -166,104 +209,64 @@ exports.login = async (req, res, next) => {
   }
 };
 
-// @desc    Google OAuth Login
+// @desc    Google OAuth Login (token-based from frontend popup)
 // @route   POST /api/v1/auth/google
 // @access  Public
 exports.googleLogin = async (req, res, next) => {
   try {
-    const { token, role } = req.body; // Role might be needed on first signup via google
+    const { token, role } = req.body;
 
     if (!token) {
-       return res.status(400).json({ success: false, error: 'No token provided' });
+      return res.status(400).json({ success: false, error: 'No token provided' });
     }
 
     const ticket = await googleClient.verifyIdToken({
       idToken: token,
       audience: process.env.GOOGLE_CLIENT_ID,
     });
-    
+
     const payload = ticket.getPayload();
     const { sub: googleId, email, name, picture } = payload;
 
-    let user = await User.findOne({ email });
+    const user = await findOrCreateGoogleUser(googleId, email, name, picture, role);
 
-    if (user) {
-      // User exists, login
-      if (user.authProvider !== 'google') {
-          // If they signed up with email but are trying to log in with google
-          user.googleId = googleId;
-          user.authProvider = 'google';
-          user.isEmailVerified = true;
-          await user.save();
-      }
-      sendTokenResponse(user, 200, res);
-    } else {
-      // User doesn't exist, register
-      user = await User.create({
-        name,
-        email,
-        password: Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8), // Dummy strong password
-        role: role || 'customer', // Default to customer if not provided in request
-        profilePicture: picture,
-        authProvider: 'google',
-        googleId,
-        isEmailVerified: true, // Google verifies email inherently
-      });
-      sendTokenResponse(user, 201, res);
-    }
+    sendTokenResponse(user, user ? 200 : 201, res);
   } catch (err) {
     console.error('Google auth error:', err);
     res.status(500).json({ success: false, error: 'Google Authentication failed' });
   }
-};// @desc    Google OAuth Callback for Redirect Flow
+};
+
+// @desc    Google OAuth Callback for Redirect Flow
 // @route   POST /api/v1/auth/google/callback
 // @access  Public
 exports.googleCallback = async (req, res, next) => {
   try {
-    const { credential, g_csrf_token } = req.body;
+    const { credential } = req.body;
 
     if (!credential) {
-       return res.redirect('http://localhost:5173/login?error=NoTokenProvided');
+      return res.redirect(`${FRONTEND_URL}/login?error=NoTokenProvided`);
     }
 
     const ticket = await googleClient.verifyIdToken({
       idToken: credential,
       audience: process.env.GOOGLE_CLIENT_ID,
     });
-    
+
     const payload = ticket.getPayload();
     const { sub: googleId, email, name, picture } = payload;
 
-    let user = await User.findOne({ email });
-
-    if (user) {
-      if (user.authProvider !== 'google') {
-          user.googleId = googleId;
-          user.authProvider = 'google';
-          user.isEmailVerified = true;
-          await user.save();
-      }
-    } else {
-      user = await User.create({
-        name,
-        email,
-        password: Math.random().toString(36).slice(-8) + Math.random().toString(36).slice(-8),
-        role: 'customer',
-        profilePicture: picture,
-        authProvider: 'google',
-        googleId,
-        isEmailVerified: true,
-      });
-    }
+    const user = await findOrCreateGoogleUser(googleId, email, name, picture, 'customer');
 
     const token = user.getSignedJwtToken();
-    
-    // Redirect back to frontend
-    res.redirect(`http://localhost:5173/google-auth-success?token=${token}&id=${user._id}&name=${encodeURIComponent(user.name)}&email=${encodeURIComponent(user.email)}&role=${user.role}`);
 
+    // Redirect with token — acceptable for buildathon; for production use httpOnly cookie instead
+    res.redirect(
+      `${FRONTEND_URL}/google-auth-success?token=${token}&id=${user._id}&name=${encodeURIComponent(user.name)}&email=${encodeURIComponent(user.email)}&role=${user.role}`
+    );
   } catch (err) {
     console.error('Google callback error:', err);
-    res.redirect('http://localhost:5173/login?error=GoogleAuthFailed');
+    res.redirect(`${FRONTEND_URL}/login?error=GoogleAuthFailed`);
   }
 };
 
@@ -274,41 +277,37 @@ exports.forgotPassword = async (req, res, next) => {
   try {
     const user = await User.findOne({ email: req.body.email });
 
-    if (!user) {
-      return res.status(404).json({ success: false, error: 'There is no user with that email' });
+    // Return generic message to prevent user enumeration
+    if (!user || user.authProvider === 'google') {
+      return res.status(200).json({
+        success: true,
+        message: 'If that email is registered, you will receive a reset link shortly.',
+      });
     }
 
-    if (user.authProvider === 'google') {
-        return res.status(400).json({ success: false, error: 'You signed up with Google. Please use Google to login.' });
-    }
-
-    // Get reset token
     const resetToken = user.getResetPasswordToken();
-
     await user.save({ validateBeforeSave: false });
 
-    // Create reset url
-    const resetUrl = `http://localhost:5173/reset-password/${resetToken}`;
-
-    const message = `You are receiving this email because you (or someone else) has requested the reset of a password. Please make a PUT request to: \n\n ${resetUrl}`;
+    const resetUrl = `${FRONTEND_URL}/reset-password/${resetToken}`;
 
     try {
       await resend.emails.send({
         from: 'Locavo <locavo@locavo.punyanshsingla.com>',
         to: user.email,
-        subject: 'Password reset token',
-        html: `<p>You requested a password reset. Click the link below to reset it:</p>
-               <a href="${resetUrl}" target="_blank">Reset Password</a>`
+        subject: 'Password Reset Request',
+        html: `<p>You requested a password reset. Click the link below to reset it (valid for 10 minutes):</p>
+               <a href="${resetUrl}" target="_blank">Reset Password</a>`,
       });
 
-      res.status(200).json({ success: true, message: 'Email sent' });
+      res.status(200).json({
+        success: true,
+        message: 'If that email is registered, you will receive a reset link shortly.',
+      });
     } catch (err) {
       console.error(err);
       user.resetPasswordToken = undefined;
       user.resetPasswordExpire = undefined;
-
       await user.save({ validateBeforeSave: false });
-
       return res.status(500).json({ success: false, error: 'Email could not be sent' });
     }
   } catch (err) {
@@ -322,7 +321,13 @@ exports.forgotPassword = async (req, res, next) => {
 // @access  Public
 exports.resetPassword = async (req, res, next) => {
   try {
-    // Get hashed token
+    const { password } = req.body;
+
+    // Basic validation
+    if (!password || password.length < 6) {
+      return res.status(400).json({ success: false, error: 'Password must be at least 6 characters' });
+    }
+
     const resetPasswordToken = crypto
       .createHash('sha256')
       .update(req.params.resettoken)
@@ -330,15 +335,14 @@ exports.resetPassword = async (req, res, next) => {
 
     const user = await User.findOne({
       resetPasswordToken,
-      resetPasswordExpire: { $gt: Date.now() }
+      resetPasswordExpire: { $gt: Date.now() },
     });
 
     if (!user) {
-      return res.status(400).json({ success: false, error: 'Invalid token' });
+      return res.status(400).json({ success: false, error: 'Invalid or expired token' });
     }
 
-    // Set new password
-    user.password = req.body.password;
+    user.password = password;
     user.resetPasswordToken = undefined;
     user.resetPasswordExpire = undefined;
     await user.save();
@@ -350,26 +354,20 @@ exports.resetPassword = async (req, res, next) => {
   }
 };
 
-
 // @desc    Get current logged in user
 // @route   GET /api/v1/auth/me
 // @access  Private
 exports.getMe = async (req, res, next) => {
   try {
     const user = await User.findById(req.user.id);
-
-    res.status(200).json({
-      success: true,
-      data: user,
-    });
+    res.status(200).json({ success: true, data: user });
   } catch (err) {
     res.status(500).json({ success: false, error: 'Server Error' });
   }
 };
 
-// Get token from model, create cookie and send response
+// Helper: create token and send JSON response
 const sendTokenResponse = (user, statusCode, res) => {
-  // Create token
   const token = user.getSignedJwtToken();
 
   res.status(statusCode).json({
@@ -380,6 +378,10 @@ const sendTokenResponse = (user, statusCode, res) => {
       name: user.name,
       email: user.email,
       role: user.role,
-    }
+      phone: user.phone,
+      profilePicture: user.profilePicture,
+      address: user.address,
+      providerDetails: user.providerDetails,
+    },
   });
 };

@@ -13,12 +13,17 @@
   "type": "commonjs",
   "dependencies": {
     "bcryptjs": "^3.0.3",
+    "cashfree-pg": "^5.1.0",
+    "cloudinary": "^2.9.0",
     "cors": "^2.8.6",
     "dotenv": "^17.3.1",
     "express": "^5.2.1",
+    "express-rate-limit": "^8.2.1",
     "google-auth-library": "^10.6.1",
     "jsonwebtoken": "^9.0.3",
     "mongoose": "^9.2.3",
+    "multer": "^2.1.0",
+    "multer-storage-cloudinary": "^4.0.0",
     "nodemon": "^3.1.14",
     "resend": "^6.9.3"
   }
