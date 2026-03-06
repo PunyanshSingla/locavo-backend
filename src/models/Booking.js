@@ -21,9 +21,11 @@ const bookingSchema = new mongoose.Schema(
       type: Date,
       required: [true, 'Please provide a date and time for the booking'],
     },
+    // Slot reference (from Availability)
+    slotId: { type: mongoose.Schema.ObjectId, default: null },
     status: {
       type: String,
-      enum: ['pending', 'confirmed', 'in_progress', 'completed', 'cancelled', 'rescheduled', 'rejected'],
+      enum: ['pending', 'awaiting_payment', 'confirmed', 'in_progress', 'completed', 'cancelled', 'rejected'],
       default: 'pending',
     },
     serviceAddress: {
@@ -32,50 +34,84 @@ const bookingSchema = new mongoose.Schema(
       state: { type: String, required: true },
       zipcode: { type: String, required: true },
     },
-    totalPrice: {
-      type: Number,
-      required: true,
-    },
+    totalPrice: { type: Number, required: true },
+    platformFee: { type: Number, default: 0 },    // 5% total cut (2.5% from customer, 2.5% from provider)
+    providerPayout: { type: Number, default: 0 }, // 97.5% of base price
+
     paymentStatus: {
       type: String,
       enum: ['pending', 'paid', 'failed', 'refunded'],
       default: 'pending',
     },
+    paymentOrderId: { type: String, default: null },     // Cashfree order ID
+    paymentSessionId: { type: String, default: null },   // Cashfree payment_session_id (for frontend SDK)
+
     specialInstructions: {
       type: String,
       maxlength: [500, 'Instructions cannot exceed 500 characters'],
     },
-    issueImages: {
-      type: [String],
-      default: [],
+
+    // OTP for work-start handshake
+    workOtp: { type: String, default: null },
+    workOtpExpire: { type: Date, default: null },
+    workOtpAttempts: { type: Number, default: 0 }, // MED-01: brute-force guard (max 5)
+
+    // Idempotency: Cashfree payment webhook reference
+    lastPaymentWebhookId: { type: String, default: null }, // CRIT-08
+
+    // GPS captured when provider enters OTP
+    providerLocation: {
+      lat: { type: Number },
+      lng: { type: Number },
+      capturedAt: { type: Date },
     },
-    providerNotes: {
-      type: String,
-      maxlength: [1000, 'Provider notes cannot exceed 1000 characters'],
-    },
+
     jobImages: {
-      before: {
-        type: [String],
-        default: [],
+      before: { type: [String], default: [] },
+      after: { type: [String], default: [] },
+    },
+    workNotes: { type: String, default: null },
+
+    // Reference images provided by the customer at booking time
+    customerImages: { type: [String], default: [] },
+
+    // Customer verification after provider marks complete
+    completionVerification: {
+      status: {
+        type: String,
+        enum: ['pending', 'accepted', 'rejected'],
+        default: 'pending',
       },
-      after: {
-        type: [String],
-        default: [],
+      reason: { type: String, default: null },
+      disputeVideo: { type: String, default: null }, // Cloudinary URL of dispute video
+      disputeImages: { type: [String], default: [] }, // Cloudinary URLs of dispute images
+      verifiedAt: { type: Date, default: null },
+      providerResponse: {
+        type: {
+          type: String,
+          enum: ['clarify', 'revisit'],
+        },
+        message: { type: String, default: null },
+        respondedAt: { type: Date, default: null },
       },
     },
-    acceptedAt: {
-      type: Date,
+
+    // Payout details
+    payoutId: { type: String, default: null }, // Cashfree payout transfer ID
+    payoutStatus: {
+      type: String,
+      enum: ['pending', 'processing', 'success', 'failed'],
+      default: 'pending',
     },
-    startedAt: {
-      type: Date,
-    },
-    completedAt: {
-      type: Date,
-    },
+
+    // Rejection reason (from provider)
+    rejectionReason: { type: String, default: null },
+
+    acceptedAt: { type: Date },
+    startedAt: { type: Date },
+    completedAt: { type: Date },
   },
-  {
-    timestamps: true,
-  }
+  { timestamps: true }
 );
 
 module.exports = mongoose.model('Booking', bookingSchema);

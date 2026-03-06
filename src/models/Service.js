@@ -12,15 +12,18 @@ const serviceSchema = new mongoose.Schema(
       ref: 'Category',
       required: true,
     },
+    globalServiceId: {
+      type: mongoose.Schema.ObjectId,
+      ref: 'GlobalService',
+      required: true,
+    },
     title: {
       type: String,
-      required: [true, 'Please add a service title'],
       trim: true,
       maxlength: [100, 'Service title cannot exceed 100 characters'],
     },
     description: {
       type: String,
-      required: [true, 'Please add a description'],
       maxlength: [1000, 'Description cannot exceed 1000 characters'],
     },
     basePrice: {

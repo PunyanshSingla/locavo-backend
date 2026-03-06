@@ -32,9 +32,9 @@ const errorHandler = (err, req, res, next) => {
     return res.status(401).json({ success: false, error: 'Token expired, please log in again' });
   }
 
-  res.status(error.statusCode || 500).json({
+  res.status(err.statusCode || 500).json({
     success: false,
-    error: error.message || 'Server Error',
+    error: err.message || 'Server Error',
   });
 };
 

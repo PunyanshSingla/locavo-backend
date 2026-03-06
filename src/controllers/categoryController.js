@@ -8,7 +8,7 @@ const Category = require('../models/Category');
 exports.getCategories = async (req, res) => {
   try {
     const categories = await Category.find({ isActive: true })
-      .sort({ sortOrder: 1, createdAt: 1 })
+      .sort({ createdAt: 1 })
       .lean();
 
     res.status(200).json({ success: true, count: categories.length, data: categories });
@@ -43,7 +43,7 @@ exports.getCategoryBySlug = async (req, res) => {
 // @access  Private (Admin)
 exports.getAllCategoriesAdmin = async (req, res) => {
   try {
-    const categories = await Category.find().sort({ sortOrder: 1, createdAt: 1 }).lean();
+    const categories = await Category.find().sort({ createdAt: 1 }).lean();
     res.status(200).json({ success: true, count: categories.length, data: categories });
   } catch (err) {
     console.error(err);
@@ -56,9 +56,9 @@ exports.getAllCategoriesAdmin = async (req, res) => {
 // @access  Private (Admin)
 exports.createCategory = async (req, res) => {
   try {
-    const { name, icon, startingPrice, description, sortOrder } = req.body;
+    const { name, icon, startingPrice, description } = req.body;
 
-    const category = await Category.create({ name, icon, startingPrice, description, sortOrder });
+    const category = await Category.create({ name, icon, startingPrice, description });
 
     res.status(201).json({ success: true, data: category });
   } catch (err) {
@@ -76,20 +76,11 @@ exports.createCategory = async (req, res) => {
 // @access  Private (Admin)
 exports.updateCategory = async (req, res) => {
   try {
-    const { name, icon, startingPrice, description, isActive, sortOrder } = req.body;
-
-    const category = await Category.findById(req.params.id);
-
-    if (!category) {
-      return res.status(404).json({ success: false, error: 'Category not found' });
-    }
-
     if (name !== undefined) category.name = name;
     if (icon !== undefined) category.icon = icon;
     if (startingPrice !== undefined) category.startingPrice = startingPrice;
     if (description !== undefined) category.description = description;
     if (isActive !== undefined) category.isActive = isActive;
-    if (sortOrder !== undefined) category.sortOrder = sortOrder;
 
     await category.save();
 

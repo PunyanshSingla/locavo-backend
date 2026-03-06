@@ -1,15 +1,11 @@
 const { Cashfree, CFEnvironment } = require('cashfree-pg');
 const crypto = require('crypto');
 const User = require('../models/User');
-const dotenv = require('dotenv');
-dotenv.config();
-console.log(process.env.CASHFREE_APP_ID, "app id");
-console.log(process.env.CASHFREE_SECRET_KEY, "secret key");
-const cashfree = new Cashfree(
-  CFEnvironment.SANDBOX,
-  process.env.CASHFREE_APP_ID,
-  process.env.CASHFREE_SECRET_KEY,
-);
+const WebhookEvent = require('../models/WebhookEvent'); // MED-04
+
+// ── Cashfree SDK init (static properties — NOT constructor args) ──────────────
+const cashfree = new Cashfree(CFEnvironment.SANDBOX, process.env.CASHFREE_APP_ID, process.env.CASHFREE_SECRET_KEY);
+const CASHFREE_VERSION = '2023-08-01';
 
 const FEATURED_AMOUNT = 500; // ₹500
 
@@ -58,7 +54,7 @@ exports.createFeatureOrder = async (req, res) => {
       order_note: 'Locavo Featured Provider Listing (30 days)',
     };
 
-    const response = await cashfree.PGCreateOrder(orderRequest);
+    const response = await cashfree.PGCreateOrder(CASHFREE_VERSION, orderRequest);
     res.status(200).json({
       success: true,
       data: {
@@ -88,7 +84,7 @@ exports.verifyFeaturePayment = async (req, res) => {
   try {
     const { orderId } = req.params;
 
-    const response = await cashfree.PGFetchOrder(orderId);
+    const response = await cashfree.PGFetchOrder(CASHFREE_VERSION, orderId);
     const order = response.data;
 
     if (order.order_status === 'PAID') {
@@ -139,20 +135,23 @@ exports.featurePaymentWebhook = async (req, res) => {
     const signature = req.headers['x-webhook-signature'];
     const timestamp = req.headers['x-webhook-timestamp'];
 
-    // Verify webhook signature
+    if (!signature || !timestamp) {
+      return res.status(200).json({ success: false, message: 'Missing headers' });
+    }
+
+    // ✅ Verify HMAC signature
     const expectedSignature = crypto
       .createHmac('sha256', process.env.CASHFREE_SECRET_KEY)
       .update(`${timestamp}${rawBody}`)
       .digest('base64');
 
     if (signature !== expectedSignature) {
-      console.warn('Webhook signature mismatch — possible spoofed request');
-      return res.status(401).json({ success: false, error: 'Invalid signature' });
+      console.warn('[WEBHOOK-FEATURE] Signature mismatch — possible spoofed request');
+      return res.status(200).json({ success: false, message: 'Invalid signature' });
     }
 
     const { data, type } = req.body;
 
-    // Only act on successful payment events
     if (type !== 'PAYMENT_SUCCESS_WEBHOOK') {
       return res.status(200).json({ success: true, message: 'Event ignored' });
     }
@@ -162,25 +161,37 @@ exports.featurePaymentWebhook = async (req, res) => {
       return res.status(200).json({ success: true, message: 'Non-feature order, ignored' });
     }
 
+    // ✅ MED-04: Idempotency — skip if already processed
+    const alreadyProcessed = await WebhookEvent.exists({ orderId });
+    if (alreadyProcessed) {
+      console.log('[WEBHOOK-FEATURE] Already processed:', orderId);
+      return res.status(200).json({ success: true, message: 'Already processed' });
+    }
+    // Record before making changes
+    await WebhookEvent.create({ orderId, eventType: type });
+
     const parts = orderId.split('_');
     const providerId = parts[1];
 
     const user = await User.findById(providerId);
     if (!user) {
-      console.error('Webhook: Provider not found for orderId:', orderId);
-      return res.status(200).json({ success: true }); // Return 200 so Cashfree doesn't retry
+      console.error('[WEBHOOK-FEATURE] Provider not found for orderId:', orderId);
+      return res.status(200).json({ success: true });
     }
 
-    user.providerDetails.isFeatured = true;
-    user.providerDetails.featuredUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
-    await user.save();
-
-    console.log(`Provider ${user.name} (${user._id}) is now featured until ${user.providerDetails.featuredUntil}`);
+    // ✅ Idempotent update — only extend if currently not featured or expired
+    if (!user.providerDetails.isFeatured || user.providerDetails.featuredUntil <= new Date()) {
+      user.providerDetails.isFeatured = true;
+      user.providerDetails.featuredUntil = new Date(Date.now() + 30 * 24 * 60 * 60 * 1000);
+      await user.save();
+      console.log(`[WEBHOOK-FEATURE] Provider ${user.name} featured until ${user.providerDetails.featuredUntil}`);
+    } else {
+      console.log(`[WEBHOOK-FEATURE] Provider ${user.name} already featured — no change`);
+    }
 
     res.status(200).json({ success: true });
   } catch (err) {
-    console.error('Webhook processing error:', err);
-    // Always return 200 to prevent Cashfree retry storms
+    console.error('[WEBHOOK-FEATURE] Error:', err);
     res.status(200).json({ success: true });
   }
 };

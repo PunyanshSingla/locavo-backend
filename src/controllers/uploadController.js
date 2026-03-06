@@ -15,13 +15,14 @@ const storage = new CloudinaryStorage({
   cloudinary: cloudinary,
   params: {
     folder: 'locavo_verifications',
-    allowed_formats: ['jpg', 'jpeg', 'png', 'pdf'],
+    allowed_formats: ['jpg', 'jpeg', 'png', 'webp', 'pdf', 'mp4', 'mov', 'avi', 'mkv'],
+    resource_type: 'auto',
     public_id: (req, file) => `${Date.now()}-${path.parse(file.originalname).name}`,
   },
 });
 
-// 10 MB file size limit enforced at network level (before reaching Cloudinary)
-const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } });
+// 50 MB file size limit enforced for videos and documents
+const upload = multer({ storage, limits: { fileSize: 50 * 1024 * 1024 } });
 
 // @desc    Upload an image/document
 // @route   POST /api/v1/upload

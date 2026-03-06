@@ -41,6 +41,17 @@ const userSchema = new mongoose.Schema(
       zipcode: String,
       country: String,
     },
+    location: {
+      // GeoJSON Point
+      type: {
+        type: String,
+        enum: ['Point'],
+      },
+      coordinates: {
+        type: [Number],
+      },
+      formattedAddress: String,
+    },
     profilePicture: {
       type: String,
       default: 'default.jpg',
@@ -100,6 +111,18 @@ const userSchema = new mongoose.Schema(
         ifscCode: String,
         bankName: String,
       },
+      bannerImage: {
+        type: String, // Cloudinary URL
+      },
+      projects: [
+        {
+          title: { type: String, required: true, maxlength: 100 },
+          description: { type: String, maxlength: 1000 },
+          beforeImages: [String],
+          afterImages: [String],
+          completedAt: { type: Date },
+        },
+      ],
       rating: {
         type: Number,
         default: 0,
@@ -113,15 +136,33 @@ const userSchema = new mongoose.Schema(
         default: false,
       },
       featuredUntil: {
-        type: Date, // null = not featured; set to 30 days ahead on payment
+        type: Date,
         default: null,
       },
+    },
+    // Customer wishlist — array of provider user IDs
+    wishlist: [
+      {
+        type: mongoose.Schema.ObjectId,
+        ref: 'User',
+      },
+    ],
+    isBanned: {
+      type: Boolean,
+      default: false,
+    },
+    banReason: {
+      type: String,
+      default: null,
     },
   },
   {
     timestamps: true,
   }
 );
+
+userSchema.index({ location: '2dsphere' });
+
 // Encrypt password using bcrypt
 userSchema.pre('save', async function () {
   if (!this.isModified('password')) {

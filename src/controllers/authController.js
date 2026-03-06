@@ -1,6 +1,7 @@
 const User = require('../models/User');
 const { Resend } = require('resend');
 const crypto = require('crypto');
+const ErrorResponse = require('../utils/ErrorResponse');
 const { OAuth2Client } = require('google-auth-library');
 
 const resend = new Resend(process.env.RESEND_API_KEY);
@@ -86,8 +87,7 @@ exports.register = async (req, res, next) => {
 
     res.status(201).json({ success: true, message: 'Verification email sent' });
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ success: false, error: 'Server Error', message: err.message });
+    next(err);
   }
 };
 
@@ -260,10 +260,18 @@ exports.googleCallback = async (req, res, next) => {
 
     const token = user.getSignedJwtToken();
 
-    // Redirect with token — acceptable for buildathon; for production use httpOnly cookie instead
-    res.redirect(
-      `${FRONTEND_URL}/google-auth-success?token=${token}&id=${user._id}&name=${encodeURIComponent(user.name)}&email=${encodeURIComponent(user.email)}&role=${user.role}`
-    );
+    // Set token in httpOnly cookie
+    const options = {
+      expires: new Date(Date.now() + 30 * 24 * 60 * 60 * 1000), // 30 days
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'Lax'
+    };
+
+    res.cookie('token', token, options);
+
+    // Redirect to frontend — include token so the SPA can update auth state
+    res.redirect(`${FRONTEND_URL}/google-auth-success?success=true&token=${token}`);
   } catch (err) {
     console.error('Google callback error:', err);
     res.redirect(`${FRONTEND_URL}/login?error=GoogleAuthFailed`);
@@ -370,18 +378,31 @@ exports.getMe = async (req, res, next) => {
 const sendTokenResponse = (user, statusCode, res) => {
   const token = user.getSignedJwtToken();
 
-  res.status(statusCode).json({
-    success: true,
-    token,
-    user: {
-      id: user._id,
-      name: user.name,
-      email: user.email,
-      role: user.role,
-      phone: user.phone,
-      profilePicture: user.profilePicture,
-      address: user.address,
-      providerDetails: user.providerDetails,
-    },
-  });
+  const options = {
+    expires: new Date(
+      Date.now() + 30 * 24 * 60 * 60 * 1000 // 30 days
+    ),
+    httpOnly: true,
+    secure: process.env.NODE_ENV === 'production',
+    sameSite: 'Lax'
+  };
+
+  res
+    .status(statusCode)
+    .cookie('token', token, options)
+    .json({
+      success: true,
+      token, // Still send token in body for convenience, but the cookie is the primary secure storage
+      user: {
+        id: user._id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+        phone: user.phone,
+        profilePicture: user.profilePicture,
+        address: user.address,
+        location: user.location,
+        providerDetails: user.providerDetails,
+      },
+    });
 };
