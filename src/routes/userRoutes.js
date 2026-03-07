@@ -13,8 +13,9 @@ const {
   deleteProject,
   toggleWishlist,
   getWishlist,
+  getAdminContact,
 } = require('../controllers/userController');
-const { protect } = require('../middleware/authMiddleware');
+const { protect, authorize } = require('../middleware/authMiddleware');
 
 const router = express.Router();
 
@@ -40,5 +41,8 @@ router.delete('/projects/:projectId', deleteProject);
 // Customer wishlist
 router.get('/wishlist', getWishlist);
 router.post('/wishlist/:providerId', toggleWishlist);
+
+// Admin contact for support
+router.get('/admin-contact', authorize('provider'), getAdminContact);
 
 module.exports = router;

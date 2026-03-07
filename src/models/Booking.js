@@ -79,13 +79,14 @@ const bookingSchema = new mongoose.Schema(
     completionVerification: {
       status: {
         type: String,
-        enum: ['pending', 'accepted', 'rejected'],
+        enum: ['pending', 'accepted', 'rejected', 'escalated'],
         default: 'pending',
       },
       reason: { type: String, default: null },
       disputeVideo: { type: String, default: null }, // Cloudinary URL of dispute video
       disputeImages: { type: [String], default: [] }, // Cloudinary URLs of dispute images
       verifiedAt: { type: Date, default: null },
+      escalatedAt: { type: Date, default: null },
       providerResponse: {
         type: {
           type: String,
@@ -94,6 +95,16 @@ const bookingSchema = new mongoose.Schema(
         message: { type: String, default: null },
         respondedAt: { type: Date, default: null },
       },
+    },
+
+    adminDecision: {
+      decision: {
+        type: String,
+        enum: ['professional_right', 'customer_right'],
+        default: null,
+      },
+      adminNote: { type: String, default: null },
+      resolvedAt: { type: Date, default: null },
     },
 
     // Payout details

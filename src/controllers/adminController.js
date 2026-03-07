@@ -2,6 +2,7 @@ const User = require('../models/User');
 const Booking = require('../models/Booking');
 const Service = require('../models/Service');
 const Category = require('../models/Category');
+const GlobalService = require('../models/GlobalService');
 
 // @desc    Get all providers
 // @route   GET /api/v1/admin/providers
@@ -76,7 +77,6 @@ exports.banProvider = async (req, res, next) => {
   }
 };
 
-const GlobalService = require('../models/GlobalService');
 
 // ─── Global Service Management ───────────────────────────────────────────────
 
@@ -288,20 +288,6 @@ exports.handleServiceRequest = async (req, res, next) => {
     if (adminNote !== undefined) request.adminNote = adminNote;
     await request.save();
 
-    // Auto-create GlobalService if approved
-    if (status === 'approved') {
-      const existing = await GlobalService.findOne({ name: request.name, categoryId: request.categoryId });
-      if (!existing) {
-        await GlobalService.create({
-          name: request.name,
-          categoryId: request.categoryId,
-          description: request.description,
-          icon: 'design_services', // Default icon, admin can change later
-          isActive: true
-        });
-      }
-    }
-
     res.status(200).json({ success: true, data: request });
   } catch (err) {
     console.error(err);
@@ -337,29 +323,6 @@ exports.handleCategoryRequest = async (req, res, next) => {
     request.status = status;
     if (adminNote !== undefined) request.adminNote = adminNote;
     await request.save();
-
-    // Auto-create Category if approved
-    if (status === 'approved') {
-      const existing = await Category.findOne({ name: request.name });
-      if (!existing) {
-        // Find highest sortOrder
-        const highestCategory = await Category.findOne().sort({ sortOrder: -1 });
-        const nextOrder = highestCategory ? highestCategory.sortOrder + 1 : 0;
-        
-        // Generate a simple slug
-        const slug = request.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
-
-        await Category.create({
-          name: request.name,
-          slug: slug,
-          icon: 'category', // Default, admin can change
-          description: request.description,
-          startingPrice: 500, // Default baseline
-          isActive: true,
-          sortOrder: nextOrder
-        });
-      }
-    }
 
     res.status(200).json({ success: true, data: request });
   } catch (err) {
@@ -475,6 +438,7 @@ exports.getDashboardStats = async (req, res, next) => {
       confirmed: bookings.filter(b => b.status === 'confirmed').length,
       completed: bookings.filter(b => b.status === 'completed').length,
       cancelled: bookings.filter(b => b.status === 'cancelled').length,
+      escalated: bookings.filter(b => b.completionVerification?.status === 'escalated').length,
     };
 
     // Get recent activity (last 5 bookings and last 5 new providers)
@@ -503,6 +467,75 @@ exports.getDashboardStats = async (req, res, next) => {
         recentActivity: { bookings: recentBookings, providers: newProviders }
       }
     });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Server Error' });
+  }
+};
+
+// @desc    Get all escalated disputes
+// @route   GET /api/v1/admin/disputes
+// @access  Private (Admin only)
+exports.getEscalatedDisputes = async (req, res, next) => {
+  try {
+    const disputes = await Booking.find({ 'completionVerification.status': 'escalated' })
+      .populate('customerId', 'name email phone profilePicture')
+      .populate('providerId', 'name email phone profilePicture providerDetails')
+      .populate({
+        path: 'serviceId',
+        populate: { path: 'globalServiceId' }
+      })
+      .sort({ 'completionVerification.escalatedAt': -1 });
+
+    res.status(200).json({ success: true, count: disputes.length, data: disputes });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Server Error' });
+  }
+};
+
+// @desc    Resolve a dispute
+// @route   PUT /api/v1/admin/disputes/:id/resolve
+// @access  Private (Admin only)
+exports.resolveDispute = async (req, res, next) => {
+  try {
+    const { decision, adminNote } = req.body;
+    if (!['professional_right', 'customer_right'].includes(decision)) {
+      return res.status(400).json({ success: false, error: 'Valid decision is required' });
+    }
+
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) return res.status(404).json({ success: false, error: 'Booking not found' });
+
+    if (booking.completionVerification?.status !== 'escalated') {
+      return res.status(400).json({ success: false, error: 'This booking is not escalated' });
+    }
+
+    booking.adminDecision = {
+      decision,
+      adminNote: adminNote || null,
+      resolvedAt: new Date(),
+    };
+
+    if (decision === 'professional_right') {
+      // 1. Release payout
+      const { dispatchPayout } = require('./bookingController');
+      booking.payoutStatus = 'pending';
+      booking.status = 'completed';
+      booking.completionVerification.status = 'accepted'; 
+      await booking.save();
+      
+      // Fire and forget payout
+      setImmediate(() => dispatchPayout(booking._id.toString()));
+    } else {
+      // 2. Customer is right -> Reset to in_progress
+      booking.status = 'in_progress';
+      booking.completionVerification.status = 'pending'; // Reset so provider can re-mark complete
+      // We keep the dispute history in the reason/images but allow fresh start
+      await booking.save();
+    }
+
+    res.status(200).json({ success: true, message: 'Dispute resolved successfully', data: booking });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, error: 'Server Error' });

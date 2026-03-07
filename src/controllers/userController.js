@@ -456,3 +456,19 @@ exports.getProvidersNearMe = async (req, res) => {
     res.status(500).json({ success: false, error: 'Server Error' });
   }
 };
+
+// @desc    Get an admin contact for support
+// @route   GET /api/v1/users/admin-contact
+// @access  Private
+exports.getAdminContact = async (req, res) => {
+  try {
+    const admin = await User.findOne({ role: 'admin', isBanned: false }).select('_id name profilePicture');
+    if (!admin) {
+      return res.status(404).json({ success: false, error: 'No admin available at the moment' });
+    }
+    res.status(200).json({ success: true, data: admin });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Server Error' });
+  }
+};

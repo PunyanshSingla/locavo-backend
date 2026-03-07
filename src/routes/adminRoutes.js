@@ -18,7 +18,9 @@ const {
   getGlobalServiceStats,
   getAllBookings,
   getBookingDetails,
-  getDashboardStats
+  getDashboardStats,
+  getEscalatedDisputes,
+  resolveDispute
 } = require('../controllers/adminController');
 const { getAllReviews, deleteReview } = require('../controllers/reviewController');
 
@@ -79,6 +81,10 @@ router.put('/category-requests/:id', handleCategoryRequest);
 // Review management
 router.get('/reviews', getAllReviews);
 router.delete('/reviews/:id', deleteReview);
+
+// Dispute management
+router.get('/disputes', getEscalatedDisputes);
+router.put('/disputes/:id/resolve', resolveDispute);
 
 module.exports = router;
 

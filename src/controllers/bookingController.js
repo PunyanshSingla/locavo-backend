@@ -36,9 +36,18 @@ exports.createBooking = async (req, res) => {
       return res.status(400).json({ success: false, error: 'Please provide all required booking details' });
     }
 
-    // Verify provider is approved
-    const provider = await User.findOne({ _id: providerId, role: 'provider', 'providerDetails.isApproved': true });
+    // Verify provider is approved and available
+    const provider = await User.findOne({ 
+      _id: providerId, 
+      role: 'provider', 
+      'providerDetails.isApproved': true 
+    });
+    
     if (!provider) return res.status(404).json({ success: false, error: 'Provider not found or not approved' });
+    
+    if (provider.providerDetails?.isAvailable === false) {
+      return res.status(400).json({ success: false, error: 'Provider is currently not accepting new bookings (Away)' });
+    }
 
     // Verify service belongs to provider — price comes from DB, not client
     const service = await Service.findOne({ _id: serviceId, providerId, isActive: true });
@@ -46,13 +55,36 @@ exports.createBooking = async (req, res) => {
 
     // ✅ Server-authoritative pricing
     const basePrice = service.basePrice;
-    const totalPrice = parseFloat((basePrice * 1.025).toFixed(2)); // Customer pays 2.5% extra
-    const platformFee = parseFloat((basePrice * 0.05).toFixed(2)); // Total 5% cut (2.5% from customer + 2.5% from base)
-    const providerPayout = parseFloat((basePrice * 0.975).toFixed(2)); // Provider gets base - 2.5%
+    const totalPrice = parseFloat((basePrice * 1.025).toFixed(2));
+    const platformFee = parseFloat((basePrice * 0.05).toFixed(2));
+    const providerPayout = parseFloat((basePrice * 0.975).toFixed(2));
 
-    // ✅ CRIT-02: Atomic slot booking — no race condition
+    // ✅ CRIT-02: Atomic slot booking & Duration validation
     if (slotId) {
       const dateStr = new Date(scheduledDate).toISOString().split('T')[0];
+      
+      // 1. First find the availability and the specific slot
+      const availability = await Availability.findOne({ providerId, date: dateStr, 'slots._id': slotId });
+      if (!availability) {
+        return res.status(404).json({ success: false, error: 'Availability not found for this date.' });
+      }
+
+      const slot = availability.slots.id(slotId);
+      if (!slot) return res.status(404).json({ success: false, error: 'Slot not found.' });
+
+      // 2. Validate duration: (endTime - startTime) >= service.durationMinutes
+      const [startH, startM] = slot.startTime.split(':').map(Number);
+      const [endH, endM] = slot.endTime.split(':').map(Number);
+      const slotDuration = (endH * 60 + endM) - (startH * 60 + startM);
+
+      if (slotDuration < service.durationMinutes) {
+        return res.status(400).json({ 
+          success: false, 
+          error: `This slot (${slotDuration} min) is too short for the selected service (${service.durationMinutes} min).` 
+        });
+      }
+
+      // 3. Atomic update to book the slot
       const slotResult = await Availability.findOneAndUpdate(
         { providerId, date: dateStr, 'slots._id': slotId, 'slots.isBooked': false },
         { $set: { 'slots.$.isBooked': true } },
@@ -148,7 +180,7 @@ exports.acceptBooking = async (req, res) => {
         customer_id: customer._id.toString(),
         customer_name: customer.name,
         customer_email: customer.email,
-        customer_phone: '+919090407368',
+        customer_phone: customer.phone || "",
       },
       order_note: `Booking payment for service`,
     };
@@ -463,8 +495,8 @@ exports.verifyCompletion = async (req, res) => {
       booking.payoutStatus = 'pending';
       await booking.save();
 
-      // Fire and forget with retry
-      setImmediate(() => dispatchPayoutWithRetry(booking._id.toString(), 3));
+      // Fire and forget (single attempt)
+      setImmediate(() => dispatchPayout(booking._id.toString()));
 
       return res.status(200).json({
         success: true,
@@ -575,6 +607,38 @@ exports.cancelBooking = async (req, res) => {
   }
 };
 
+// @desc    Escalate a dispute to admin
+// @route   PUT /api/v1/bookings/:id/escalate
+// @access  Private (Customer or Provider)
+exports.escalateBooking = async (req, res) => {
+  try {
+    const booking = await Booking.findById(req.params.id);
+    if (!booking) return res.status(404).json({ success: false, error: 'Booking not found' });
+
+    // Only customer or provider of this booking can escalate
+    const isCustomer = booking.customerId.toString() === req.user.id;
+    const isProvider = booking.providerId.toString() === req.user.id;
+
+    if (!isCustomer && !isProvider) {
+      return res.status(403).json({ success: false, error: 'Not authorized' });
+    }
+
+    // Can only escalate if there is a rejection or a dispute in progress
+    if (booking.completionVerification?.status !== 'rejected') {
+       return res.status(400).json({ success: false, error: 'Cannot escalate this booking. A dispute must be active first.' });
+    }
+
+    booking.completionVerification.status = 'escalated';
+    booking.completionVerification.escalatedAt = new Date();
+    await booking.save();
+
+    res.status(200).json({ success: true, message: 'Dispute escalated to admin for review.', data: booking });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Server Error' });
+  }
+};
+
 // @desc    Customer reschedules a booking
 // @route   PUT /api/v1/bookings/:id/reschedule
 // @access  Private (Customer)
@@ -669,14 +733,69 @@ exports.getMyQuotes = async (req, res) => {
   }
 };
 
-// ─── CRIT-04: Async payout dispatcher with exponential backoff retry ──────────
-async function dispatchPayoutWithRetry(bookingId, retriesLeft) {
+// @desc    Get payment summary and history for provider
+// @route   GET /api/v1/bookings/provider-payments
+// @access  Private (Provider)
+exports.getProviderPaymentSummary = async (req, res) => {
+  try {
+    const providerId = req.user.id;
+
+    // 1. Calculate stats logic
+    const allBookings = await Booking.find({ providerId });
+
+    // Earnings already in account (successfully paid out)
+    const totalEarnings = allBookings
+      .filter(b => b.payoutStatus === 'success')
+      .reduce((sum, b) => sum + (b.providerPayout || 0), 0);
+
+    // Paid by client, but not yet disbursed (pending/processing payout)
+    const pendingPayouts = allBookings
+      .filter(b => b.paymentStatus === 'paid' && b.payoutStatus !== 'success')
+      .reduce((sum, b) => sum + (b.providerPayout || 0), 0);
+
+    // Expected from active bookings, but not yet paid by client
+    const pendingClient = allBookings
+      .filter(b => b.paymentStatus !== 'paid' && !['cancelled', 'rejected'].includes(b.status))
+      .reduce((sum, b) => sum + (b.providerPayout || 0), 0);
+
+    const failedPayments = allBookings.filter(b => b.paymentStatus === 'failed').length;
+
+    // 2. Fetch history (Recent completed/payout related bookings)
+    const history = await populateBooking(
+      Booking.find({ 
+        providerId, 
+        status: { $in: ['confirmed', 'in_progress', 'completed', 'cancelled'] } 
+      })
+      .sort({ updatedAt: -1 })
+      .limit(20)
+    ).lean();
+
+    res.status(200).json({
+      success: true,
+      data: {
+        stats: {
+          totalEarnings: parseFloat(totalEarnings.toFixed(2)),
+          pendingPayouts: parseFloat(pendingPayouts.toFixed(2)),
+          pendingClient: parseFloat(pendingClient.toFixed(2)),
+          failedPayments
+        },
+        history
+      }
+    });
+  } catch (err) {
+    console.error('getProviderPaymentSummary error:', err);
+    res.status(500).json({ success: false, error: 'Server Error' });
+  }
+};
+
+// ─── CRIT-04: Async payout dispatcher (single attempt) ────────────────────────
+async function dispatchPayout(bookingId) {
   try {
     const booking = await Booking.findById(bookingId);
     if (!booking) return;
 
-    // Guard: don't re-run if already succeeded
-    if (booking.payoutStatus === 'success') return;
+    // Guard: don't re-run if already succeeded or processing
+    if (booking.payoutStatus === 'success' || booking.payoutStatus === 'processing') return;
 
     const result = await processCashfreePayout(booking);
     if (result.success) {
@@ -686,25 +805,14 @@ async function dispatchPayoutWithRetry(bookingId, retriesLeft) {
       });
       console.log(`[PAYOUT] Initiated for booking ${bookingId}, transferId: ${result.transferId}`);
     } else {
-      if (retriesLeft > 0) {
-        const delay = (4 - retriesLeft) * 30_000; // 30s, 60s, 90s
-        console.warn(`[PAYOUT] Failed for ${bookingId}, retrying in ${delay / 1000}s... (${retriesLeft} left)`);
-        console.warn(result);
-        setTimeout(() => dispatchPayoutWithRetry(bookingId, retriesLeft - 1), delay);
-      } else {
-        // All retries exhausted — mark failed, alert via log (admin should intervene)
-        await Booking.findByIdAndUpdate(bookingId, { payoutStatus: 'failed' });
-        console.error(`[PAYOUT] PERMANENTLY FAILED for booking ${bookingId}. Manual intervention required.`);
-      }
+      // Payout failed — mark failed, alert via log (admin should intervene)
+      await Booking.findByIdAndUpdate(bookingId, { payoutStatus: 'failed' });
+      console.error(`[PAYOUT] FAILED for booking ${bookingId}. Manual intervention required.`);
+      console.error(result);
     }
   } catch (err) {
     console.error(`[PAYOUT] Exception for booking ${bookingId}:`, err.message);
-    if (retriesLeft > 0) {
-      setTimeout(() => dispatchPayoutWithRetry(bookingId, retriesLeft - 1), 60_000);
-    } else {
-      await Booking.findByIdAndUpdate(bookingId, { payoutStatus: 'failed' }).catch(() => { });
-      console.error(`[PAYOUT] PERMANENTLY FAILED for booking ${bookingId}`);
-    }
+    await Booking.findByIdAndUpdate(bookingId, { payoutStatus: 'failed' }).catch(() => { });
   }
 }
 
@@ -790,4 +898,4 @@ async function processCashfreePayout(booking) {
   }
 }
 
-module.exports.dispatchPayoutWithRetry = dispatchPayoutWithRetry;
+module.exports.dispatchPayout = dispatchPayout;

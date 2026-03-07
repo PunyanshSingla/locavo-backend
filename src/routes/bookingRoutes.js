@@ -14,6 +14,8 @@ const {
   getMyQuotes,
   cancelBooking,
   rescheduleBooking,
+  getProviderPaymentSummary,
+  escalateBooking,
 } = require('../controllers/bookingController');
 const { protect, authorize } = require('../middleware/authMiddleware');
 
@@ -22,6 +24,7 @@ router.use(protect);
 
 router.post('/', authorize('customer'), createBooking);
 router.get('/', getMyBookings);
+router.get('/provider-payments', authorize('provider'), getProviderPaymentSummary);
 router.get('/quotes', getMyQuotes);
 
 router.put('/:id/accept', authorize('provider'), acceptBooking);
@@ -35,5 +38,6 @@ router.put('/:id/verify', authorize('customer'), verifyCompletion);
 router.put('/:id/dispute-response', authorize('provider'), respondToDispute);
 router.put('/:id/cancel', authorize('customer'), cancelBooking);
 router.put('/:id/reschedule', authorize('customer'), rescheduleBooking);
+router.put('/:id/escalate', escalateBooking);
 
 module.exports = router;

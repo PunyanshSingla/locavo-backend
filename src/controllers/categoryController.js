@@ -1,4 +1,7 @@
 const Category = require('../models/Category');
+const Service = require('../models/Service');
+const GlobalService = require('../models/GlobalService');
+const User = require('../models/User');
 
 // ─── Public ──────────────────────────────────────────────────────────────────
 
@@ -106,6 +109,39 @@ exports.deleteCategory = async (req, res) => {
     }
 
     res.status(200).json({ success: true, data: {} });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Server Error' });
+  }
+};
+// @desc    Get services within a category
+// @route   GET /api/v1/categories/:id/services
+// @access  Public
+exports.getCategoryServices = async (req, res) => {
+  try {
+    const services = await GlobalService.find({ categoryId: req.params.id, isActive: true });
+    res.status(200).json({ success: true, count: services.length, data: services });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Server Error' });
+  }
+};
+
+// @desc    Get providers within a category
+// @route   GET /api/v1/categories/:id/providers
+// @access  Public
+exports.getCategoryProviders = async (req, res) => {
+  try {
+    const categoryId = req.params.id;
+    const providerIds = await Service.find({ categoryId, isActive: true }).distinct('providerId');
+    
+    const providers = await User.find({
+      _id: { $in: providerIds },
+      role: 'provider',
+      'providerDetails.isApproved': true
+    }).select('-password -providerDetails.documentImage -providerDetails.liveSelfie -providerDetails.bankDetails');
+
+    res.status(200).json({ success: true, count: providers.length, data: providers });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, error: 'Server Error' });

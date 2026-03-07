@@ -7,7 +7,6 @@ const { OAuth2Client } = require('google-auth-library');
 const resend = new Resend(process.env.RESEND_API_KEY);
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-// Use environment variable - never hardcode localhost
 const FRONTEND_URL = process.env.FRONTEND_URL || 'http://localhost:5173';
 
 // ─── Shared helper: find or create a user from a verified Google payload ────
