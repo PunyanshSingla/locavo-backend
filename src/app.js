@@ -3,7 +3,7 @@ const cors = require('cors')
 const rateLimit = require('express-rate-limit')
 const cookieParser = require('cookie-parser')
 const errorHandler = require('./middleware/errorHandler')
-dotenv.f
+
 const app = express()
 
 // Route files
