@@ -1,6 +1,7 @@
 const Service = require('../models/Service');
 const GlobalService = require('../models/GlobalService');
 const ServiceRequest = require('../models/ServiceRequest');
+const CategoryRequest = require('../models/CategoryRequest');
 
 // @desc    Provider adds a new service
 // @route   POST /api/v1/services
@@ -91,6 +92,59 @@ exports.requestService = async (req, res) => {
     });
 
     res.status(201).json({ success: true, data: request });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Server Error' });
+  }
+};
+
+// @desc    Get provider's own service requests
+// @route   GET /api/v1/services/my-service-requests
+// @access  Private (Provider)
+exports.getMyServiceRequests = async (req, res) => {
+  try {
+    const requests = await ServiceRequest.find({ providerId: req.user.id })
+      .populate('categoryId', 'name')
+      .sort({ createdAt: -1 });
+    res.status(200).json({ success: true, count: requests.length, data: requests });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Server Error' });
+  }
+};
+
+// @desc    Request a new category
+// @route   POST /api/v1/services/category-request
+// @access  Private (Provider)
+exports.requestCategory = async (req, res) => {
+  try {
+    const { name, description } = req.body;
+
+    if (!name || !description) {
+      return res.status(400).json({ success: false, error: 'name and description are required' });
+    }
+
+    const request = await CategoryRequest.create({
+      providerId: req.user.id,
+      name,
+      description
+    });
+
+    res.status(201).json({ success: true, data: request });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Server Error' });
+  }
+};
+
+// @desc    Get provider's own category requests
+// @route   GET /api/v1/services/my-category-requests
+// @access  Private (Provider)
+exports.getMyCategoryRequests = async (req, res) => {
+  try {
+    const requests = await CategoryRequest.find({ providerId: req.user.id })
+      .sort({ createdAt: -1 });
+    res.status(200).json({ success: true, count: requests.length, data: requests });
   } catch (err) {
     console.error(err);
     res.status(500).json({ success: false, error: 'Server Error' });

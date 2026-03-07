@@ -224,6 +224,7 @@ exports.updateProfile = async (req, res, next) => {
         numReviews: user.providerDetails?.numReviews || 0,
         isFeatured: user.providerDetails?.isFeatured || false,
         featuredUntil: user.providerDetails?.featuredUntil || null,
+        featuredImage: providerDetails.featuredImage || user.providerDetails?.featuredImage,
       };
     }
 

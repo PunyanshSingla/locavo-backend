@@ -139,6 +139,9 @@ const userSchema = new mongoose.Schema(
         type: Date,
         default: null,
       },
+      featuredImage: {
+        type: String, // Cloudinary URL
+      },
     },
     // Customer wishlist — array of provider user IDs
     wishlist: [

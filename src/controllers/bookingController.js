@@ -547,13 +547,13 @@ exports.cancelBooking = async (req, res) => {
     if (!booking) return res.status(404).json({ success: false, error: 'Booking not found' });
     if (booking.customerId.toString() !== req.user.id) return res.status(403).json({ success: false, error: 'Not authorized' });
 
-    // User Rule: can't cancel if payment not done (unless it's still a pending request)
-    if (booking.status !== 'pending' && booking.paymentStatus !== 'paid') {
-      return res.status(400).json({ success: false, error: 'Cannot cancel/reschedule this booking before payment is completed' });
+    // User Rule: can't cancel if payment is already done or work has started
+    if (booking.paymentStatus === 'paid') {
+      return res.status(400).json({ success: false, error: 'Cannot cancel this booking after payment is completed' });
     }
 
-    if (['cancelled', 'completed', 'rejected'].includes(booking.status)) {
-      return res.status(400).json({ success: false, error: `Booking is already ${booking.status}` });
+    if (['cancelled', 'completed', 'rejected', 'in_progress'].includes(booking.status)) {
+      return res.status(400).json({ success: false, error: `Cannot cancel a ${booking.status} booking` });
     }
 
     // Release the slot if applicable
@@ -589,12 +589,12 @@ exports.rescheduleBooking = async (req, res) => {
     if (!booking) return res.status(404).json({ success: false, error: 'Booking not found' });
     if (booking.customerId.toString() !== req.user.id) return res.status(403).json({ success: false, error: 'Not authorized' });
 
-    // User Rule: can't reschedule if payment not done (unless it's still a pending request)
-    if (booking.status !== 'pending' && booking.paymentStatus !== 'paid') {
-      return res.status(400).json({ success: false, error: 'Cannot reschedule this booking before payment is completed' });
+    // User Rule: can't reschedule if payment is already done or work has started
+    if (booking.paymentStatus === 'paid') {
+      return res.status(400).json({ success: false, error: 'Cannot reschedule this booking after payment is completed' });
     }
 
-    if (['cancelled', 'completed', 'rejected'].includes(booking.status)) {
+    if (['cancelled', 'completed', 'rejected', 'in_progress'].includes(booking.status)) {
       return res.status(400).json({ success: false, error: `Cannot reschedule a ${booking.status} booking` });
     }
 

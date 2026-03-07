@@ -13,6 +13,8 @@ const {
   getProviderFullDetails,
   getServiceRequests,
   handleServiceRequest,
+  getCategoryRequests,
+  handleCategoryRequest,
   getGlobalServiceStats,
   getAllBookings,
   getBookingDetails,
@@ -70,6 +72,9 @@ router.get('/bookings', getAllBookings);
 router.get('/bookings/:id', getBookingDetails);
 router.get('/service-requests', getServiceRequests);
 router.put('/service-requests/:id', handleServiceRequest);
+
+router.get('/category-requests', getCategoryRequests);
+router.put('/category-requests/:id', handleCategoryRequest);
 
 // Review management
 router.get('/reviews', getAllReviews);

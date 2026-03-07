@@ -256,6 +256,7 @@ exports.getGlobalServiceStats = async (req, res, next) => {
 };
 
 const ServiceRequest = require('../models/ServiceRequest');
+const CategoryRequest = require('../models/CategoryRequest');
 
 // @desc    Get all service requests
 // @route   GET /api/v1/admin/service-requests
@@ -284,13 +285,81 @@ exports.handleServiceRequest = async (req, res, next) => {
     if (!request) return res.status(404).json({ success: false, error: 'Request not found' });
 
     request.status = status;
-    request.adminNote = adminNote;
+    if (adminNote !== undefined) request.adminNote = adminNote;
     await request.save();
 
-    // If approved, you might want to automatically create a GlobalService, 
-    // but the user said "admin will select service created by admin", 
-    // so maybe just marking it as approved is enough for the admin to then manually create it?
-    // Let's stick to status update for now.
+    // Auto-create GlobalService if approved
+    if (status === 'approved') {
+      const existing = await GlobalService.findOne({ name: request.name, categoryId: request.categoryId });
+      if (!existing) {
+        await GlobalService.create({
+          name: request.name,
+          categoryId: request.categoryId,
+          description: request.description,
+          icon: 'design_services', // Default icon, admin can change later
+          isActive: true
+        });
+      }
+    }
+
+    res.status(200).json({ success: true, data: request });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Server Error' });
+  }
+};
+
+// @desc    Get all category requests
+// @route   GET /api/v1/admin/category-requests
+// @access  Private (Admin only)
+exports.getCategoryRequests = async (req, res, next) => {
+  try {
+    const requests = await CategoryRequest.find()
+      .populate('providerId', 'name email')
+      .sort({ createdAt: -1 });
+    res.status(200).json({ success: true, count: requests.length, data: requests });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ success: false, error: 'Server Error' });
+  }
+};
+
+// @desc    Handle category request (Approve/Reject)
+// @route   PUT /api/v1/admin/category-requests/:id
+// @access  Private (Admin only)
+exports.handleCategoryRequest = async (req, res, next) => {
+  try {
+    const { status, adminNote } = req.body;
+    const request = await CategoryRequest.findById(req.params.id);
+
+    if (!request) return res.status(404).json({ success: false, error: 'Category Request not found' });
+
+    request.status = status;
+    if (adminNote !== undefined) request.adminNote = adminNote;
+    await request.save();
+
+    // Auto-create Category if approved
+    if (status === 'approved') {
+      const existing = await Category.findOne({ name: request.name });
+      if (!existing) {
+        // Find highest sortOrder
+        const highestCategory = await Category.findOne().sort({ sortOrder: -1 });
+        const nextOrder = highestCategory ? highestCategory.sortOrder + 1 : 0;
+        
+        // Generate a simple slug
+        const slug = request.name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/(^-|-$)+/g, '');
+
+        await Category.create({
+          name: request.name,
+          slug: slug,
+          icon: 'category', // Default, admin can change
+          description: request.description,
+          startingPrice: 500, // Default baseline
+          isActive: true,
+          sortOrder: nextOrder
+        });
+      }
+    }
 
     res.status(200).json({ success: true, data: request });
   } catch (err) {
