@@ -3,7 +3,8 @@ const { Resend } = require('resend');
 const crypto = require('crypto');
 const ErrorResponse = require('../utils/ErrorResponse');
 const { OAuth2Client } = require('google-auth-library');
-
+const dotenv = require('dotenv');
+dotenv.config();
 const resend = new Resend(process.env.RESEND_API_KEY);
 const googleClient = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 

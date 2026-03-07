@@ -5,7 +5,6 @@ const WebhookEvent = require('../models/WebhookEvent'); // MED-04
 
 // ── Cashfree SDK init (static properties — NOT constructor args) ──────────────
 const cashfree = new Cashfree(CFEnvironment.SANDBOX, process.env.CASHFREE_APP_ID, process.env.CASHFREE_SECRET_KEY);
-const CASHFREE_VERSION = '2023-08-01';
 
 const FEATURED_AMOUNT = 500; // ₹500
 
@@ -54,7 +53,7 @@ exports.createFeatureOrder = async (req, res) => {
       order_note: 'Locavo Featured Provider Listing (30 days)',
     };
 
-    const response = await cashfree.PGCreateOrder(CASHFREE_VERSION, orderRequest);
+    const response = await cashfree.PGCreateOrder(orderRequest);
     res.status(200).json({
       success: true,
       data: {
@@ -84,7 +83,7 @@ exports.verifyFeaturePayment = async (req, res) => {
   try {
     const { orderId } = req.params;
 
-    const response = await cashfree.PGFetchOrder(CASHFREE_VERSION, orderId);
+    const response = await cashfree.PGFetchOrder(orderId);
     const order = response.data;
 
     if (order.order_status === 'PAID') {
