@@ -79,6 +79,14 @@ exports.createCategory = async (req, res) => {
 // @access  Private (Admin)
 exports.updateCategory = async (req, res) => {
   try {
+    const { name, icon, startingPrice, description, isActive } = req.body;
+
+    const category = await Category.findById(req.params.id);
+
+    if (!category) {
+      return res.status(404).json({ success: false, error: 'Category not found' });
+    }
+
     if (name !== undefined) category.name = name;
     if (icon !== undefined) category.icon = icon;
     if (startingPrice !== undefined) category.startingPrice = startingPrice;
