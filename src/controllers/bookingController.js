@@ -317,7 +317,7 @@ exports.confirmPayment = async (req, res) => {
     booking.status = 'confirmed';
     booking.paymentStatus = 'paid';
     booking.workOtp = otpHash;  // stored as hash
-    booking.workOtpExpire = new Date(Date.now() + 30 * 60 * 1000);
+    booking.workOtpExpire = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000); // 2 days
     await booking.save();
 
     // Send RAW otp only via email — never return in API response
@@ -328,7 +328,7 @@ exports.confirmPayment = async (req, res) => {
       html: `<p>Hi ${booking.customerId.name},</p>
              <p>Your booking is <strong>confirmed</strong>! Your provider will ask for this OTP when they arrive to start the work.</p>
              <h2 style="font-size:32px;letter-spacing:8px;color:#1c8779;">${rawOtp}</h2>
-             <p>This OTP is valid for <strong>30 minutes</strong>. Do not share it until the provider is physically present.</p>`,
+             <p>This OTP is valid for <strong>2 days</strong>. Do not share it until the provider is physically present.</p>`,
     }).catch(e => console.error('OTP email failed:', e.message));
 
     res.status(200).json({ success: true, message: 'Payment verified. OTP sent to your email.' });

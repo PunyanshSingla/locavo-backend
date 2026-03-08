@@ -61,7 +61,7 @@ exports.register = async (req, res, next) => {
 
     // Generate 6-digit code + 15-minute expiry
     const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
-    const verificationExpire = new Date(Date.now() + 15 * 60 * 1000); // 15 minutes
+    const verificationExpire = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000); // 2 days
 
     const user = await User.create({
       name,
@@ -79,7 +79,7 @@ exports.register = async (req, res, next) => {
         from: 'Locavo <locavo@locavo.punyanshsingla.com>',
         to: email,
         subject: 'Verify your Locavo account',
-        html: `<p>Your verification code is: <strong>${verificationCode}</strong></p><p>This code expires in 15 minutes.</p>`,
+        html: `<p>Your verification code is: <strong>${verificationCode}</strong></p><p>This code expires in 2 days.</p>`,
       });
     } catch (emailErr) {
       console.error('Email failed to send, but user created:', emailErr.message);
@@ -150,7 +150,7 @@ exports.resendVerification = async (req, res, next) => {
 
     const verificationCode = Math.floor(100000 + Math.random() * 900000).toString();
     user.emailVerificationCode = verificationCode;
-    user.emailVerificationCodeExpire = new Date(Date.now() + 15 * 60 * 1000);
+    user.emailVerificationCodeExpire = new Date(Date.now() + 2 * 24 * 60 * 60 * 1000); // 2 days
     await user.save();
 
     try {
@@ -158,7 +158,7 @@ exports.resendVerification = async (req, res, next) => {
         from: 'Locavo <locavo@locavo.punyanshsingla.com>',
         to: email,
         subject: 'Verify your Locavo account',
-        html: `<p>Your new verification code is: <strong>${verificationCode}</strong></p><p>This code expires in 15 minutes.</p>`,
+        html: `<p>Your new verification code is: <strong>${verificationCode}</strong></p><p>This code expires in 2 days.</p>`,
       });
     } catch (emailErr) {
       console.error('Resend email failed:', emailErr.message);
@@ -303,7 +303,7 @@ exports.forgotPassword = async (req, res, next) => {
         from: 'Locavo <locavo@locavo.punyanshsingla.com>',
         to: user.email,
         subject: 'Password Reset Request',
-        html: `<p>You requested a password reset. Click the link below to reset it (valid for 10 minutes):</p>
+        html: `<p>You requested a password reset. Click the link below to reset it (valid for 2 days):</p>
                <a href="${resetUrl}" target="_blank">Reset Password</a>`,
       });
 
